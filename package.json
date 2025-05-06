@@ -1,0 +1,27 @@
+{
+  "name": "uicdn",
+  "version": "1.0.0",
+  "description": "CLI for your favorite component registry",
+  "keywords": [
+    "cdn",
+    "shadcn",
+    "registry",
+    "cli"
+  ],
+  "homepage": "https://github.com/iegik/uicdn#readme",
+  "bugs": {
+    "url": "https://github.com/iegik/uicdn/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/iegik/uicdn.git"
+  },
+  "license": "MIT",
+  "author": "Arthur Janson",
+  "type": "commonjs",
+  "main": "uicdn.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "bin": "./uicdn.js"
+}
