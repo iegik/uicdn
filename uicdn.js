@@ -7,43 +7,84 @@ import os from "os";
 import url from "url";
 
 // === Defaults ===
-let REGISTRY_GIT = "https://github.com/iegik/uicdn-bootstrap.git";
-const REGISTRY_BRANCH = "main";
-const TEMP_DIR = path.join(os.tmpdir(), "uicdn-registry");
-
-let componentPath = "./src/components";
-let uiPath = null;
+const tmp = path.join(os.tmpdir(), "uicdn-registry");
 
 // === CLI Args Parsing ===
 const argv = process.argv.slice(2);
-const cmd = argv[0];
-const itemName = argv[1];
-const destPath = argv[2];
+const cmd = argv.shift();
+const itemName = argv.shift();
 
-for (let i = 3; i < argv.length; i++) {
-  if (argv[i] === "--registry" && argv[i + 1]) REGISTRY_GIT = argv[++i];
-  else if (argv[i] === "--componentPath" && argv[i + 1]) componentPath = argv[++i];
-  else if (argv[i] === "--uiPath" && argv[i + 1]) uiPath = argv[++i];
+function parseArgv(argv, defaults) {
+  const knownFlags = Object.keys(defaults)
+  const result = {
+    ...defaults,
+    _: [] // positional arguments (e.g., cmd, itemName)
+  };
+
+  let i = 0;
+  while (i < argv.length) {
+    const arg = argv[i];
+
+    if (arg.startsWith('--')) {
+      const flag = arg.slice(2);
+      const next = argv[i + 1];
+
+      if (knownFlags.includes(flag) && next && !next.startsWith('--')) {
+        result[flag] = next;
+        argv.splice(i, 2); // remove flag and value
+      } else {
+        result[flag] = true;
+        argv.splice(i, 1); // remove just the flag
+      }
+    } else {
+      result._.push(arg);
+      i++;
+    }
+  }
+
+  return result;
 }
+
+let {
+  registry,
+  registryBranch,
+  componentPath,
+  uiPath,
+  registryPath,
+  registryFile,
+} = parseArgv(argv, {
+  registry: "https://github.com/iegik/uicdn-bootstrap.git",
+  registryBranch: "main",
+  componentPath: "./src/components",
+  uiPath: null,
+  registryPath: ".",
+  registryFile: null,
+});
 
 if (!uiPath) uiPath = path.join(componentPath, "ui");
 
+const destPath = argv.shift();
+
 function cloneOrUpdateRepo() {
-  if (fs.existsSync(TEMP_DIR)) {
-    execSync(`git -C ${TEMP_DIR} pull`, { stdio: "inherit" });
+  if (fs.existsSync(tmp)) {
+    execSync(`git -C ${tmp} pull`, { stdio: "inherit" });
   } else {
-    execSync(`git clone --depth=1 -b ${REGISTRY_BRANCH} ${REGISTRY_GIT} ${TEMP_DIR}`, { stdio: "inherit" });
+    execSync(`git clone --depth=1 -b ${registryBranch} ${registry} ${tmp}`, { stdio: "inherit" });
   }
 }
 
-function loadRegistry() {
-  const registryPath = path.join(TEMP_DIR, "registry.json");
-  if (fs.existsSync(registryPath)) {
-    return JSON.parse(fs.readFileSync(registryPath, "utf8"));
+async function loadRegistry() {
+  const modulesPath = path.join(tmp, registryPath, registryFile);
+  if (fs.existsSync(modulesPath)) {
+    return await import(url.pathToFileURL(modulesPath).href);
   }
-  const jsPath = path.join(TEMP_DIR, "registry.js");
+  const jsonPath = path.join(tmp, registryPath, "registry.json");
+  if (fs.existsSync(jsonPath)) {
+    return JSON.parse(fs.readFileSync(jsonPath, "utf8"));
+  }
+  const jsPath = path.join(tmp, registryPath, "registry.js");
   if (fs.existsSync(jsPath)) {
-    return require(url.pathToFileURL(jsPath).href);
+    return import(url.pathToFileURL(jsPath).href);
   }
   throw new Error("No registry.json or registry.js found in registry repo.");
 }
@@ -81,12 +122,12 @@ function collectFiles(item, items, collected = new Set()) {
 
 function mapFileDest(filePath) {
   const isUI = filePath.includes("/ui/") || filePath.startsWith("ui/");
-  return path.join(isUI ? uiPath : componentPath, path.basename(filePath));
+  return path.join(destPath || (isUI ? uiPath : componentPath), path.basename(filePath));
 }
 
 function copyFiles(files) {
   for (const file of files) {
-    const src = path.join(TEMP_DIR, file.path);
+    const src = path.join(tmp, registryPath, file.path);
     const dest = mapFileDest(file.path);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.copyFileSync(src, dest);
@@ -101,26 +142,26 @@ function installDeps(deps) {
 }
 
 // === Run ===
-if (cmd === "add" && itemName && destPath) {
+if (cmd === "add" && itemName) {
   (async () => {
-    console.log(`📥 Fetching registry from ${REGISTRY_GIT}...`);
+    console.log(`📥 Fetching registry from ${registry}...`);
     cloneOrUpdateRepo();
-    const registry = loadRegistry();
-    const item = resolveItemByName(registry.items, itemName);
+    const r = await loadRegistry();
+    const item = resolveItemByName(r.items, itemName);
     if (!item) throw new Error(`Component "${itemName}" not found in registry.`);
 
     console.log(`🔍 Resolving "${item.name}"...`);
-    const allComponentNames = Array.from(resolveRegistryDeps(item, registry.items));
+    const allComponentNames = Array.from(resolveRegistryDeps(item, r.items));
     allComponentNames.unshift(item.name); // ensure main item is first
 
-    const allItemsToCopy = allComponentNames.map(name => resolveItemByName(registry.items, name)).filter(Boolean);
+    const allItemsToCopy = allComponentNames.map(name => resolveItemByName(r.items, name)).filter(Boolean);
 
     // Aggregate all files and dependencies
     const allFiles = new Set();
     const allDeps = new Set();
 
     for (const componentItem of allItemsToCopy) {
-      collectFiles(componentItem, registry.items, allFiles);
+      collectFiles(componentItem, r.items, allFiles);
       (componentItem.dependencies || []).forEach(dep => allDeps.add(dep));
     }
 
